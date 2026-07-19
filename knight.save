@@ -1,0 +1,21 @@
+#!/bin/bash
+
+MODULE_DIR="$(dirname "$0")/core/modules"
+
+if [ $# -eq 0 ]; then
+    echo "KnightOS Command Center" 
+    echo
+    echo "Use:"
+    echo
+    echo "    ./knight help"
+    exit 0
+fi
+
+MODULE="$MODULE_DIR/$1.sh"
+
+if [ -x "$MODULE" ]; then
+shift
+else
+    echo "[ERROR] Unknown command: $1"
+    exit 1
+fi

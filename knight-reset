@@ -1,0 +1,40 @@
+#!/bin/bash
+# KnightOS Reset – удаление всех пакетов KnightOS
+
+BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
+INSTALLED="$BASE_DIR/var/installed.list"
+
+if [ ! -f "$INSTALLED" ] || [ ! -s "$INSTALLED" ]; then
+    echo "Нет установленных пакетов KnightOS."
+    exit 0
+fi
+
+echo "========================================="
+echo " KnightOS Reset – удаление всех пакетов"
+echo "========================================="
+echo
+echo "Будут удалены следующие пакеты:"
+while read -r pkg ver; do
+    echo "  - $pkg (версия $ver)"
+done < "$INSTALLED"
+echo
+
+read -p "Продолжить? (y/N): " confirm
+if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+    echo "Отмена."
+    exit 0
+fi
+
+echo
+echo "Начинаю удаление..."
+
+while read -r pkg ver; do
+    echo "----------------------------------------"
+    echo "Удаляю $pkg..."
+    bash "$BASE_DIR/knight" remove "$pkg"
+done < "$INSTALLED"
+
+echo
+echo "========================================="
+echo " Готово! Все пакеты KnightOS удалены."
+echo "========================================="

@@ -1,0 +1,18 @@
+audio-control 1.0
+demo-optimizer 1.0
+desktop-meta 1.0
+disk-ssd 1.0
+gaming-meta 1.0
+gpu-nvidia 1.0
+kernel-tune 1.0
+my-custom-tweak 1.0
+ram-zram 1.0
+security-hardening 1.0
+sysctl 1.1
+test 0.1
+sysctl
+cpu-performance
+cpu-performance
+cpu-performance
+sysctl
+ram-zram

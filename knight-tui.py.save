@@ -1,0 +1,438 @@
+#!/usr/bin/env python3
+import subprocess, os, re, threading, sys
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def clean(s):
+    return re.sub(r'\x1B\[[0-?]*[ -/]*[@-~]', '', s)
+
+def run_bg(cmd, *args, callback=None):
+    def target():
+        full = [os.path.join(BASE_DIR, "knight"), cmd] + list(args)
+        try:
+            r = subprocess.run(full, capture_output=True, text=True, timeout=60, cwd=BASE_DIR)
+            out = clean(r.stdout + r.stderr)
+        except Exception as e:
+            out = f"Error: {e}"
+        if callback: root.after(0, callback, out)
+    threading.Thread(target=target, daemon=True).start()
+
+def load_locale(lang):
+    loc = {}
+    path = os.path.join(BASE_DIR, "core", "locale", f"{lang}.conf")
+    if os.path.exists(path):
+        with open(path) as f:
+            for line in f:
+                if '=' in line:
+                    k, v = line.strip().split('=', 1)
+                    loc[k.strip()] = v.strip().strip('"')
+    return loc
+
+def current_lang():
+    try:
+        with open(os.path.join(BASE_DIR, "knight.conf")) as f:
+            for line in f:
+                if line.startswith("KNIGHT_LANG="):
+                    return line.split('=',1)[1].strip()
+    except: pass
+    return "en"
+
+def update_config(key, value):
+    conf = os.path.join(BASE_DIR, "knight.conf")
+    lines = []
+    with open(conf) as f:
+        for line in f:
+            if line.startswith(f"{key}="):
+                line = f"{key}={value}\n"
+            lines.append(line)
+    with open(conf, "w") as f:
+        f.writelines(lines)
+
+class KnightApp:
+    THEMES = {
+        "dark":    {"bg":"#1e1e1e","fg":"white","out_bg":"#2d2d2d","out_fg":"#d4d4d4"},
+        "light":   {"bg":"#f0f0f0","fg":"black","out_bg":"white","out_fg":"black"},
+        "monokai": {"bg":"#272822","fg":"#f8f8f2","out_bg":"#3e3d32","out_fg":"#f8f8f2"},
+        "ocean":   {"bg":"#2b3b42","fg":"#c5c8c6","out_bg":"#343d46","out_fg":"#c5c8c6"},
+        "forest":  {"bg":"#2e4f2e","fg":"#e0e0e0","out_bg":"#3a5a3a","out_fg":"#e0e0e0"}
+    }
+
+    def __init__(self, root):
+        self.root = root
+        self.lang = current_lang()
+        self.locale = load_locale(self.lang)
+        self.theme = "dark"
+        self.load_theme()
+        self.main_frame = None
+        self.create_main_ui()
+        self.root.protocol("WM_DELETE_WINDOW", root.quit)
+
+    def load_theme(self):
+        try:
+            with open(os.path.join(BASE_DIR, "knight.conf")) as f:
+                for line in f:
+                    if line.startswith("THEME="):
+                        self.theme = line.split('=',1)[1].strip()
+        except: pass
+
+    def apply_theme(self, name=None):
+        if name: self.theme = name
+        c = self.THEMES.get(self.theme, self.THEMES["dark"])
+        self.root.configure(bg=c["bg"])
+        style = ttk.Style()
+        style.theme_use('clam')
+        for w in ('TFrame','TLabel','TButton'): style.configure(w, background=c["bg"], foreground=c["fg"])
+        if hasattr(self, 'out'):
+            self.out.configure(bg=c["out_bg"], fg=c["out_fg"], insertbackground=c["fg"])
+        if hasattr(self, 'copy_btn'):
+            self.copy_btn.configure(bg=c["out_bg"], fg=c["fg"])
+
+    def _(self, key):
+        return self.locale.get(key, key)
+
+    def translate_output(self, text):
+        rep = {
+            "Doctor": self._("MSG_DOCTOR_TITLE"),
+            "Checks": self._("MSG_CHECKS"),
+            "OK": self._("MSG_OK_LABEL"),
+            "Warnings": self._("MSG_WARNINGS"),
+            "Errors": self._("MSG_ERRORS"),
+            "Free RAM": self._("MSG_FREE_RAM"),
+            "Bluetooth": self._("MSG_BLUETOOTH"),
+            "CPU Driver": self._("MSG_CPU_DRIVER"),
+            "Governor": self._("MSG_GOVERNOR"),
+            "Turbo Boost": self._("MSG_TURBO_BOOST"),
+            "NVIDIA Driver": self._("MSG_NVIDIA_DRIVER"),
+            "IO Scheduler": self._("MSG_IO_SCHEDULER"),
+            "Kernel": self._("MSG_KERNEL"),
+            "TCP Congestion": self._("MSG_TCP_CONGESTION"),
+            "Network Buffers": self._("MSG_NETWORK_BUFFERS"),
+            "Service": self._("MSG_SERVICE"),
+            "Swappiness": self._("MSG_SWAPPINESS"),
+            "Cache Pressure": self._("MSG_CACHE_PRESSURE"),
+            "Transparent Huge Pages": self._("MSG_THP"),
+        }
+        for eng, loc in rep.items():
+            if loc and loc != eng:
+                text = text.replace(eng, loc)
+        title = self._("MSG_DOCTOR_TITLE")
+        text = text.replace("========== Doctor ==========", f"========== {title} ==========")
+        return text
+
+    def run_with_progress(self, cmd, *args):
+        self.root.config(cursor="watch")
+        def cb(res):
+            translated = self.translate_output(res)
+            self.out.delete(1.0, tk.END)
+            self.out.insert(tk.END, translated)
+            self.root.config(cursor="")
+        run_bg(cmd, *args, callback=cb)
+
+    def clear_main(self):
+        if self.main_frame:
+            self.main_frame.destroy()
+        self.main_frame = ttk.Frame(self.root)
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    def create_main_ui(self):
+        self.clear_main()
+        left = ttk.Frame(self.main_frame, width=250)
+        left.pack(side=tk.LEFT, fill=tk.Y, padx=(0,10))
+        left.pack_propagate(False)
+
+        ttk.Label(left, text=self._("MSG_MAIN_TITLE"), font=('Arial', 12, 'bold')).pack(pady=5)
+
+        main_actions = [
+            
+(self._("MSG_DOCTOR_BTN"), self.doctor),
+            (self._("MSG_SHELL_PACKAGES"), self.open_packages),
+            (self._("MSG_SHELL_BENCHMARK"), self.open_benchmark),
+            ("🌍 Remote", self.open_remote),
+            ("🔍 Scan URL", self.open_scan),
+            ("📚 Browse Sources", self.browse_sources),
+            (self._("MSG_LOGS_BTN"), self.logs),
+            (self._("MSG_HELP_BTN"), self.show_help)
+        ]
+        for text, cmd in main_actions:
+            ttk.Button(left, text=text, command=cmd, width=25).pack(pady=2, padx=5, fill=tk.X)
+
+        bottom = ttk.Frame(left)
+        bottom.pack(side=tk.BOTTOM, fill=tk.X, pady=5)
+        ttk.Label(bottom, text=self._("MSG_THEME_BTN") + ":").pack(anchor='w')
+        self.theme_var = tk.StringVar(value=self.theme)
+        theme_combo = ttk.Combobox(bottom, textvariable=self.theme_var,
+                                   values=list(self.THEMES.keys()), state="readonly", width=22)
+        theme_combo.pack(fill=tk.X, pady=2)
+        theme_combo.bind('<<ComboboxSelected>>', lambda e: self.apply_theme(self.theme_var.get()))
+        ttk.Button(bottom, text=self._("MSG_LANG_BTN"), command=self.toggle_lang).pack(fill=tk.X, pady=2)
+        ttk.Button(bottom, text=self._("MSG_QUIT_BTN"), command=self.root.quit).pack(fill=tk.X, pady=5)
+
+        right = ttk.Frame(self.main_frame)
+        right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        self.out = scrolledtext.ScrolledText(right, wrap=tk.WORD, font=('Consolas', 10))
+        self.out.pack(fill=tk.BOTH, expand=True)
+        self.copy_btn = tk.Button(right, text=self._("MSG_COPY_BTN"), command=self.copy_out)
+        self.copy_btn.pack(pady=(5,0), anchor='se')
+
+        self.apply_theme()
+
+    def copy_out(self):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self.out.get(1.0, tk.END))
+        messagebox.showinfo(self._("MSG_COPY_SUCCESS"), self._("MSG_COPY_SUCCESS"))
+
+    def doctor(self): self.run_with_progress("doctor")
+    def logs(self):
+        p = os.path.join(BASE_DIR, "core", "logs", "knight.log")
+        if os.path.exists(p):
+            with open(p) as f: self.out.insert(tk.END, f.read())
+        else: self.out.insert(tk.END, self._("MSG_LOG_NOT_FOUND"))
+
+    def show_help(self):
+        text = self._("MSG_HELP_TEXT")
+        if text == "MSG_HELP_TEXT":
+            text = "Help content not available in your language."
+        self.out.delete(1.0, tk.END)
+        self.out.insert(tk.END, text)
+
+    def all_pkg_list(self):
+        packages = []
+        local_dir = os.path.join(BASE_DIR, "packages")
+        if os.path.exists(local_dir):
+            for d in os.listdir(local_dir):
+                pkg_path = os.path.join(local_dir, d, "package.conf")
+                if os.path.isfile(pkg_path):
+                    packages.append(d)
+        remotes_dir = os.path.join(BASE_DIR, "var", "remotes")
+        if os.path.exists(remotes_dir):
+            for remote_name in os.listdir(remotes_dir):
+                remote_path = os.path.join(remotes_dir, remote_name)
+                if os.path.isdir(remote_path):
+                    for d in os.listdir(remote_path):
+                        pkg_path = os.path.join(remote_path, d, "package.conf")
+                        if os.path.isfile(pkg_path):
+                            packages.append(d)
+        return sorted(set(packages))
+
+    def pkg_op(self, op):
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"{op} package")
+        dialog.geometry("350x120")
+        c = self.THEMES[self.theme]
+        dialog.configure(bg=c["bg"])
+        ttk.Label(dialog, text=f"{self._('MSG_SELECT_PKG')} {op}:").pack(pady=5)
+        combo = ttk.Combobox(dialog, values=self.all_pkg_list(), width=35)
+        combo.pack(pady=5)
+        combo.focus_set()
+        combo.bind('<KeyRelease>', lambda e: combo.configure(values=[p for p in self.all_pkg_list() if combo.get().lower() in p.lower()]))
+        def on_ok():
+            pkg = combo.get().strip()
+            if pkg:
+                dialog.destroy()
+                self.run_with_progress(op, pkg)
+            else:
+                dialog.destroy()
+        ttk.Button(dialog, text=self._("MSG_OK"), command=on_ok).pack(pady=5)
+
+    def open_packages(self):
+        self._open_submenu(self._("MSG_SHELL_PACKAGES"), [
+            (self._("MSG_SHELL_PKG_LIST"), lambda: self.run_with_progress("list")),
+            (self._("MSG_SHELL_PKG_INSTALL"), lambda: self.pkg_op("install")),
+            (self._("MSG_SHELL_PKG_REMOVE"), lambda: self.pkg_op("remove")),
+            (self._("MSG_SHELL_PKG_INFO"), lambda: self.pkg_op("info"))
+        ])
+
+    def open_remote(self):
+        self._open_submenu("Remote Repositories", [
+            ("List remotes", lambda: self.run_with_progress("remote", "list")),
+            ("Add remote", self.add_remote_dialog),
+            ("Remove remote", self.remove_remote_dialog),
+            ("Update remote", self.update_remote_dialog)
+        ])
+
+    def open_scan(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Scan Remote URL")
+        dialog.geometry("450x150")
+        c = self.THEMES[self.theme]
+        dialog.configure(bg=c["bg"])
+        ttk.Label(dialog, text="Enter Git URL to scan for packages:").pack(pady=5)
+        url_entry = ttk.Entry(dialog, width=50)
+        url_entry.pack(pady=5)
+        def submit():
+            url = url_entry.get().strip()
+            if url:
+                dialog.destroy()
+                self.run_with_progress("parse", url)
+        ttk.Button(dialog, text="Scan", command=submit).pack(pady=10)
+
+    def browse_sources(self):
+        sources_file = os.path.join(BASE_DIR, "var", "remotes", "sources.list")
+        if not os.path.exists(sources_file):
+            messagebox.showinfo("Browse Sources", "Sources list not found. Creating default...")
+            # Создаём стандартный список, если отсутствует (как в remote.sh)
+            default_content = [
+                "mypackages|git@github.com:LittleDxrky/KnightOS.git|Gaming, desktop and custom tweaks by LittleDxrky",
+                "awesome-tweaks|https://github.com/awesome-linux/awesome-linux-tweaks.git|Community-driven collection of performance tweaks",
+                "auto-cpufreq|https://github.com/AdnanHodzic/auto-cpufreq.git|Automatic CPU speed & power optimizer for Linux",
+                "TLP|https://github.com/linrunner/TLP.git|Advanced power management for Linux",
+                "gamemode|https://github.com/FeralInteractive/gamemode.git|Optimise system performance on demand",
+                "undervolt|https://github.com/georgewhewell/undervolt.git|Intel/AMD CPU undervolting tool",
+                "mangohud|https://github.com/flightlessmango/Mangohud.git|Vulkan/OpenGL overlay for monitoring FPS, temperatures, etc.",
+                "zram-config|https://github.com/novaspirit/zram-config.git|Easy zram swap setup"
+            ]
+            with open(sources_file, "w") as f:
+                for line in default_content:
+                    f.write(line + "\n")
+
+        entries = []
+        with open(sources_file, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "|" in line:
+                    parts = line.split("|")
+                    if len(parts) >= 3:
+                        entries.append((parts[0], parts[1], parts[2]))
+
+        if not entries:
+            messagebox.showinfo("Browse Sources", "No sources available.")
+            return
+
+        # Диалог со списком
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Browse Remote Repositories")
+        dlg.geometry("650x350")
+        c = self.THEMES[self.theme]
+        dlg.configure(bg=c["bg"])
+
+        ttk.Label(dlg, text="Select a repository to add:", font=('Arial', 11, 'bold')).pack(pady=5)
+
+        # Frame для списка с прокруткой
+        frame = ttk.Frame(dlg)
+        frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        scrollbar = ttk.Scrollbar(frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        listbox = tk.Listbox(frame, yscrollcommand=scrollbar.set, bg=c["out_bg"], fg=c["out_fg"], font=('Consolas', 9))
+        for i, (name, url, desc) in enumerate(entries, 1):
+            listbox.insert(tk.END, f"{i:2d}. {name} - {desc}")
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=listbox.yview)
+
+        def add_selected():
+            selection = listbox.curselection()
+            if selection:
+                idx = selection[0]
+                if idx < len(entries):
+                    name, url, _ = entries[idx]
+                    dlg.destroy()
+                    # Добавляем репозиторий (аналог remote add)
+                    self.run_with_progress("remote", "add", name, url)
+
+        btn_frame = ttk.Frame(dlg)
+        btn_frame.pack(pady=5)
+        ttk.Button(btn_frame, text="Add Selected", command=add_selected).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Close", command=dlg.destroy).pack(side=tk.LEFT, padx=5)
+
+    def add_remote_dialog(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Add remote repository")
+        dialog.geometry("400x180")
+        c = self.THEMES[self.theme]
+        dialog.configure(bg=c["bg"])
+        ttk.Label(dialog, text="Name:").pack(pady=2)
+        name_entry = ttk.Entry(dialog, width=40)
+        name_entry.pack(pady=2)
+        ttk.Label(dialog, text="Git URL:").pack(pady=2)
+        url_entry = ttk.Entry(dialog, width=40)
+        url_entry.pack(pady=2)
+        ttk.Label(dialog, text="Use git@github... for SSH or https://TOKEN@... for private", foreground="gray").pack()
+        def submit():
+            name = name_entry.get().strip()
+            url = url_entry.get().strip()
+            if name and url:
+                dialog.destroy()
+                self.run_with_progress("remote", "add", name, url)
+        ttk.Button(dialog, text="Add", command=submit).pack(pady=10)
+
+    def remove_remote_dialog(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Remove remote")
+        dialog.geometry("300x150")
+        c = self.THEMES[self.theme]
+        dialog.configure(bg=c["bg"])
+        ttk.Label(dialog, text="Remote name:").pack(pady=5)
+        combo = ttk.Combobox(dialog, values=self._list_remote_names(), width=25)
+        combo.pack(pady=5)
+        def submit():
+            name = combo.get().strip()
+            if name:
+                dialog.destroy()
+                self.run_with_progress("remote", "remove", name)
+        ttk.Button(dialog, text="Remove", command=submit).pack(pady=10)
+
+    def update_remote_dialog(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Update remote")
+        dialog.geometry("300x150")
+        c = self.THEMES[self.theme]
+        dialog.configure(bg=c["bg"])
+        ttk.Label(dialog, text="Remote name (empty = all):").pack(pady=5)
+        combo = ttk.Combobox(dialog, values=[""] + self._list_remote_names(), width=25)
+        combo.pack(pady=5)
+        def submit():
+            name = combo.get().strip()
+            if name:
+                dialog.destroy()
+                self.run_with_progress("remote", "update", name)
+            else:
+                dialog.destroy()
+                self.run_with_progress("remote", "update")
+        ttk.Button(dialog, text="Update", command=submit).pack(pady=10)
+
+    def _list_remote_names(self):
+        remotes_dir = os.path.join(BASE_DIR, "var", "remotes")
+        if os.path.exists(remotes_dir):
+            return [d for d in os.listdir(remotes_dir) if os.path.isdir(os.path.join(remotes_dir, d))]
+        return []
+
+    def open_benchmark(self):
+        self._open_submenu(self._("MSG_SHELL_BENCHMARK"), [
+            (self._("MSG_SHELL_BASELINE"), lambda: self.run_with_progress("monitor", "baseline")),
+            (self._("MSG_SHELL_COMPARE"), lambda: self.run_with_progress("monitor", "compare")),
+            (self._("MSG_SHELL_HISTORY"), lambda: self.run_with_progress("monitor", "history")),
+            (self._("MSG_SHELL_SHOW_BASELINE"), lambda: self.run_with_progress("monitor", "show"))
+        ])
+
+    def _open_submenu(self, title, actions):
+        sub = tk.Toplevel(self.root)
+        sub.title(title)
+        sub.geometry("300x" + str(70 + len(actions)*35))
+        c = self.THEMES[self.theme]
+        sub.configure(bg=c["bg"])
+        ttk.Label(sub, text=title, font=('Arial', 12, 'bold')).pack(pady=10)
+        for text, cmd in actions:
+            ttk.Button(sub, text=text, command=cmd, width=25).pack(pady=3)
+        ttk.Button(sub, text=self._("MSG_BACK"), command=sub.destroy, width=25).pack(pady=10)
+
+    def toggle_lang(self):
+        new = "ru" if self.lang == "en" else "en"
+        update_config("KNIGHT_LANG", new)
+        self.lang = new
+        self.locale = load_locale(self.lang)
+        if hasattr(self, "_pkg_cache"):
+            del self._pkg_cache
+        self.refresh_ui()
+
+    def refresh_ui(self):
+        if self.main_frame:
+            self.main_frame.destroy()
+        self.create_main_ui()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = KnightApp(root)
+    root.mainloop()

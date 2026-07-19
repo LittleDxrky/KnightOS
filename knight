@@ -1,0 +1,22 @@
+#!/bin/bash
+BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
+MODULE_DIR="$BASE_DIR/core/modules"
+
+if [ $# -eq 0 ]; then
+    echo "KnightOS – модульная система управления Linux"
+    echo "Использование: ./knight <команда> [аргументы]"
+    echo "Доступные команды:"
+    ls "$MODULE_DIR" | sed 's/\.sh$//' | sort | while read cmd; do
+        printf "  %-12s\n" "$cmd"
+    done
+    exit 0
+fi
+
+MODULE="$MODULE_DIR/$1.sh"
+if [ -x "$MODULE" ]; then
+    shift
+    bash "$MODULE" "$@"
+else
+    echo "[ERROR] Неизвестная команда: $1"
+    exit 1
+fi
